@@ -34,6 +34,7 @@ dependencies:
       - gendoc==1.0.1
       - ipython==8.15.0
       - jax==0.4.14
+      - jaxlib==0.4.14
       - jedi==0.19.0
       - kiwisolver==1.4.5
       - matplotlib==3.7.2
@@ -61,4 +62,4 @@ dependencies:
       - traitlets==5.9.0
       - tzdata==2023.3
       - wcwidth==0.2.6
-prefix: /gpfs/commons/home/ieshghi/miniconda3/envs/hypermin
+prefix: /home/ieshghi/miniconda3/envs/hypermin
