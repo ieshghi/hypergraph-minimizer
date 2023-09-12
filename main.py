@@ -8,11 +8,15 @@ from scipy.special import logsumexp
 #from jax.scipy.optimize import minimize
 from scipy.optimize import minimize
 from matplotlib.animation import FuncAnimation
-
+from jax.nn import logsumexp
+from scipy.special import comb
+import multiprocessing as mlp
 #we have a data file generated from concatemer data. Let's restrict ourselves to chromosome 8 for now (sneakily interested in seeing that tyfonas junction)
 
+
+pool = mlp.Pool()
 def load_concats(filename = 'data_example_skinny',chr_focus = False):
-    data = pd.read_csv(filename)
+    data = pd.read_csv(filename,nrows=1000)
     
     if chr_focus:
         data = data[data.seqnames==chr_focus]
@@ -31,20 +35,32 @@ def load_concats(filename = 'data_example_skinny',chr_focus = False):
     return concatemers,numbin
 
 def getfuncs(data): 
-    energyfun = lambda x: concat_energy(x,data)
+    energyfun = lambda x: concat_energies(x,data)
     negforcefun = jax.jacrev(energyfun)
     hessfun = jax.hessian(energyfun)
     return energyfun,negforcefun,hessfun 
 
-def concat_energy(coords,concats):
+def concat_energies(coords,concats): #this is where all the speeding up can happen
     #given coordinate data, evaluate the energy contribution from a single concatemer
+    coords = coords.reshape(int(coords.size/2),2)
+    #fun = lambda x: concat_energy(coords,x)
     energy = 0
-#    coords = coords.reshape(int(coords.size/2),2)
-    for concat in concats:
-        distances = my_pdist(coords[concat]) - 1 #want an equilibrium distance of 1
-        distsqmax = jnp.log(jnp.sum(jnp.exp(distances**2))) #JAX-compatible logsumexp()
-        energy += distsqmax
+    distlist = map(lambda x:(my_pdist(coords[x])-1),concats)
+    distsqlist = map(lambda x:(logsumexp(x**2)*len(x)),distlist)
+    energy = sum(distsqlist)
+    
+    #for cat in concats:
+    #    distances = (my_pdist(coords[cat]) - 1) #want an equilibrium distance of 1
+    #    distsqmax = logsumexp(distances**2) #JAX-compatible logsumexp()
+    #    energy += comb(len(cat),2)*distsqmax
     return energy
+#    all_ens = pool.map(fun,concats)
+#    return sum(all_ens)
+
+def concat_energy(coords,cat):
+    distances = (my_pdist(coords[cat]) - 1) #want an equilibrium distance of 1
+    distsqmax = logsumexp(distances**2) #JAX-compatible logsumexp()
+    return comb(len(cat),2)*distsqmax
 
 def my_pdist(X): #copied from scipy.spatial.distance, to make it Jax-compatible
     n = X.shape[0]
@@ -57,28 +73,29 @@ def my_pdist(X): #copied from scipy.spatial.distance, to make it Jax-compatible
             k += 1
     return dm
 
-
 def lazy_test():
-    cats,nb = load_concats(filename='data_test',chr_focus='a')
+    cats,nb = load_concats(filename='data_example_skinny',chr_focus='chr8')
     initc = np.random.rand(nb*2)*nb
     energy,negforce,hess = getfuncs(cats)
     print(energy(initc))
   
-    step = 0.05
-    nstep = 1000
+    step = 0.01
     coords = initc.copy()
-    eps = 1e-10
-    en = 1
+    eps = 1e-1
+    delta = 1
     coords_hist = []
-    save_frame = 10
+    save_frame = 1
     i = 0
-    while en > eps:
+    en_prev = 0
+    while delta > eps:
         dc = (-1)*step*negforce(coords)
         coords += dc
         if i%save_frame==0:
             coords_hist.append(coords.reshape(int(coords.size/2),2))
         en = energy(coords)
-        print(en)
+        delta = abs(en-en_prev)
+        en_prev = en.copy()
+        print(en,delta)
         i+=1
     coords = coords.reshape(int(coords.size/2),2)
     return coords_hist
@@ -88,12 +105,12 @@ def animate_soln(coords_hist,cats,fname='bla'):
     
     fig,ax = plt.subplots()
     line, = ax.plot(coords_hist[0][:,0],coords_hist[0][:,1],'.') 
-    catlines = []
-    for cat in cats:
-        a, = ax.plot(coords_hist[0][cat][:,0],coords_hist[0][cat][:,1],'-') 
-        catlines.append(a)
+#    catlines = []
+#    for cat in cats:
+#        a, = ax.plot(coords_hist[0][cat][:,0],coords_hist[0][cat][:,1],'-') 
+#        catlines.append(a)
     
-    print(catlines[0])
+#    print(catlines[0])
     def animate(i):
         print('Frame '+str(i)+'/'+str(nt))
         line.set_data(coords_hist[i][:,0],coords_hist[i][:,1])
@@ -102,7 +119,7 @@ def animate_soln(coords_hist,cats,fname='bla'):
 #            catline = catlines[i]
 #            catline.set_data(coords_hist[i][cat][:,0],coords_hist[i][cat][:,1],'-')
          
-        return line,catlines
+        return line,
     
     anim = FuncAnimation(fig, animate,frames=nt, blit=True)
     
